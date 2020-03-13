@@ -946,406 +946,414 @@ const OSM_ADDRESS = "0x81FE72B5A8d1A857d176C3E7d5Bd2679A9B85763";
 const CDP_MANAGER_ADDRESS = "0x5ef30b9986345249bc32d8928B7ee64DE9435E39";
 const CAT_ADDRESS = "0x78F2c2AF65126834c51822F56Be0d7469D7A523E";
 
-var web3;
-var usingRemoteProvider = true;
-if (typeof window.ethereum !== 'undefined' && window.ethereum.networkVersion &&
-    window.ethereum.networkVersion === "1" && window.ethereum.isMetaMask) {
-    try {
-        web3 = new Web3(window.ethereum);
-        let subscription = web3.eth.subscribe('newBlockHeaders');
-        subscription.unsubscribe();
-        console.log("Using local web3 provider");
-        usingRemoteProvider = false;
-    } catch (e) {
-        usingRemoteProvider = true;
+let web3;
+let usingRemoteProvider = true;
+
+window.addEventListener("load", () => {
+    if (typeof window.ethereum !== 'undefined' && window.ethereum.networkVersion &&
+        window.ethereum.networkVersion === "1" && window.ethereum.isMetaMask) {
+        try {
+            web3 = new Web3(window.ethereum);
+            let subscription = web3.eth.subscribe('newBlockHeaders');
+            subscription.unsubscribe();
+            console.log("Using local web3 provider");
+            usingRemoteProvider = false;
+        } catch (e) {
+            usingRemoteProvider = true;
+        }
     }
-}
-if (usingRemoteProvider) {
-    var infura = "wss://mainnet.infura.io/ws/v3/cabe301d837048959747eaa4415846b7";
-    var provider = new Web3.providers.WebsocketProvider(infura);
-    web3 = new Web3(provider);
-    console.log("Using remote web3 provider");
-}
+    if (usingRemoteProvider) {
+        var infura = "wss://mainnet.infura.io/ws/v3/cabe301d837048959747eaa4415846b7";
+        var provider = new Web3.providers.WebsocketProvider(infura);
+        web3 = new Web3(provider);
+        console.log("Using remote web3 provider");
+    }
 
-// Get instance of contracts
-const flipContract = new web3.eth.Contract(FLIPPER_ABI, ETH_FLIP_ADDRESS);
-const osmContract = new web3.eth.Contract(OSM_ABI, OSM_ADDRESS);
-const cdpManagerContract = new web3.eth.Contract(CDP_MANAGER_ABI, CDP_MANAGER_ADDRESS);
+    // Get instance of contracts
+    const flipContract = new web3.eth.Contract(FLIPPER_ABI, ETH_FLIP_ADDRESS);
+    const osmContract = new web3.eth.Contract(OSM_ABI, OSM_ADDRESS);
+    const cdpManagerContract = new web3.eth.Contract(CDP_MANAGER_ABI, CDP_MANAGER_ADDRESS);
 
-// Get new events and populate last events global variable
-var events = [];
-var getFlipEvents = function getFlipEvents(fromBlockNumber) {
-    console.log(`Get auction events from block: ${fromBlockNumber}`);
-    return flipContract.getPastEvents("allEvents", {
-            fromBlock: fromBlockNumber,
-            toBlock: "latest"
-        },
-        function (err, result) {
-            if (!err) {
-                console.log("Received Events:", result.length);
-                events = result;
-            } else {
-                console.log(err);
-            }
-        });
-};
-
-// Get the price in the given block number and populate last price global variable
-var osmPrice = 0;
-var getOsmPrice = function getOsmPrice(blockNumber) {
-    return osmContract.getPastEvents("LogValue", {
-            fromBlock: blockNumber - 600,
-            toBlock: blockNumber
-        },
-        function (err, result) {
-            if (!err) {
-                var logEvent = result[result.length - 1];
-                if (!logEvent) {
-                    return 0;
+    // Get new events and populate last events global variable
+    var events = [];
+    var getFlipEvents = function getFlipEvents(fromBlockNumber, toBlockNumber = latest) {
+        console.log(`Get auction events from block: ${fromBlockNumber}`);
+        return flipContract.getPastEvents("allEvents", {
+                fromBlock: fromBlockNumber,
+                toBlock: toBlockNumber
+            },
+            function (err, result) {
+                if (!err) {
+                    console.log("Received Events:", result.length);
+                    events = [...events, ...result];
+                } else {
+                    console.log(err);
                 }
-                var priceInWei = web3.utils.toBN(logEvent.returnValues[0]);
-                var price = web3.utils.fromWei(priceInWei);
-                osmPrice = parseFloat(price).toFixed(2);
-                return price;
-            } else {
-                console.log(err);
-            }
-        });
-};
+            });
+    };
 
-// Get the vault number from an Kick event hash
-var getVaultNumber = async function (kickTxHash) {
-    let txRceipt = await web3.eth.getTransactionReceipt(kickTxHash);
-    let totalCdpis = await cdpManagerContract.methods.cdpi().call();
-    for (let j = 0; j < txRceipt.logs.length; j++) {
-        let log = txRceipt.logs[j];
-        if (log.address === CAT_ADDRESS) {
-            let vault = log.topics[2].slice(-40);
-            for (let k = totalCdpis; k > 0; k--) {
-                let urn = await cdpManagerContract.methods.urns(k).call();
-                urn = urn.slice(-40);
-                if (vault === urn.toLowerCase()) {
-                    return k;
+    // Get the price in the given block number and populate last price global variable
+    var osmPrice = 0;
+    var getOsmPrice = function getOsmPrice(blockNumber) {
+        return osmContract.getPastEvents("LogValue", {
+                fromBlock: blockNumber - 600,
+                toBlock: blockNumber
+            },
+            function (err, result) {
+                if (!err) {
+                    var logEvent = result[result.length - 1];
+                    if (!logEvent) {
+                        return 0;
+                    }
+                    var priceInWei = web3.utils.toBN(logEvent.returnValues[0]);
+                    var price = web3.utils.fromWei(priceInWei);
+                    osmPrice = parseFloat(price).toFixed(2);
+                    return price;
+                } else {
+                    console.log(err);
+                }
+            });
+    };
+
+    // Get the vault number from an Kick event hash
+    var getVaultNumber = async function (kickTxHash) {
+        let txRceipt = await web3.eth.getTransactionReceipt(kickTxHash);
+        let totalCdpis = await cdpManagerContract.methods.cdpi().call();
+        for (let j = 0; j < txRceipt.logs.length; j++) {
+            let log = txRceipt.logs[j];
+            if (log.address === CAT_ADDRESS) {
+                let vault = log.topics[2].slice(-40);
+                for (let k = totalCdpis; k > 0; k--) {
+                    let urn = await cdpManagerContract.methods.urns(k).call();
+                    urn = urn.slice(-40);
+                    if (vault === urn.toLowerCase()) {
+                        return k;
+                    }
                 }
             }
         }
-    }
-};
+    };
 
-// Events types signatures to be processed
-const TEND = "0x4b43ed1200000000000000000000000000000000000000000000000000000000";
-const DENT = "0x5ff3a38200000000000000000000000000000000000000000000000000000000";
-const DEAL = "0xc959c42b00000000000000000000000000000000000000000000000000000000";
-const TICK = "0xfc7b6aee00000000000000000000000000000000000000000000000000000000";
+    // Events types signatures to be processed
+    const TEND = "0x4b43ed1200000000000000000000000000000000000000000000000000000000";
+    const DENT = "0x5ff3a38200000000000000000000000000000000000000000000000000000000";
+    const DEAL = "0xc959c42b00000000000000000000000000000000000000000000000000000000";
+    const TICK = "0xfc7b6aee00000000000000000000000000000000000000000000000000000000";
 
-// Variable to summarize by ID all auctions currently registered
-var auctions = {};
+    // Variable to summarize by ID all auctions currently registered
+    var auctions = {};
 
-// Show last events received
-var eventsLoaded = false;
-var showEvents = async function showEvents(someID) {
-    // Clear loading msg in body
-    if (Object.keys(auctions).length === 0) {
-        document.getElementById("app").innerHTML = "";
-    }
+    // Show last events received
+    var eventsLoaded = false;
+    var showEvents = async function showEvents(someID) {
+        // Clear loading msg in body
+        if (Object.keys(auctions).length === 0) {
+            document.getElementById("app").innerHTML = "";
+        }
 
-    // Disable filter when populating
-    if (events.length > 0) {
-        hideFilterSearch();
-    }
+        // Disable filter when populating
+        if (events.length > 0) {
+            hideFilterSearch();
+        }
 
-    // Iterate over events
-    for (let i = 0; i < events.length; i++) {
-        let event = events[i];
-        let values = "";
-        let blockDate = new Date();
-        await web3.eth.getBlock(event.blockNumber).then(function (block) {
-            if (block) {
-                let blockTime = block.timestamp;
-                blockDate = new Date(blockTime * 1000);
-                values = blockDate.toLocaleString() + " | ";
-            } else {
-                values = new Date().toLocaleString() + " | ";
-            }
-        });
-        let eventType = "Unknown";
-        let flipId = 0;
-
-        // Event types cases
-        if (event.event === "Kick") {
-            eventType = "KICK";
-            flipId = parseInt(event.returnValues.id, 10);
-            values += "ID: <b>" + flipId + "</b> | ";
-
-            let lot = event.returnValues.lot / 10 ** 18;
-            values += "lot: " + lot.toFixed(3) + " eth | ";
-
-            let tab = event.returnValues.tab / 10 ** 27 / 10 ** 18;
-            values += "tab: " + tab.toFixed(3) + " dai | ";
-
-            osmPrice = 0;
-            await getOsmPrice(event.blockNumber);
-
-            // Register KICK over Auction dictionary
-            auctions[flipId] = {
-                id: flipId,
-                kickDate: blockDate.toUTCString().slice(5),
-                kickDay: blockDate.getUTCDate(),
-                kickMonth: blockDate.getUTCMonth() + 1,
-                kickPrice: osmPrice.toString(),
-                kickLot: lot.toFixed(5),
-                tends: 0,
-                dents: 0,
-                bid: null,
-                lot: null,
-                tab: tab.toFixed(5),
-                guy: null,
-                dealPrice: null,
-                paidPrice: null,
-                state: "OPEN"
-            };
-
-            if (osmPrice > 0) {
-                values += "Maker OSM Price: $" + auctions[flipId]["kickPrice"] + " | ";
-            } else {
-                values += "Maker OSM Price: $---,-- | ";
-            }
-        } else if (event.raw.topics[0] === TEND) {
-            eventType = "TEND";
-            flipId = parseInt(event.raw.topics[2], 16);
-
-            // Avoid showing TEND without a KICK
-            if (!auctions[flipId]) {
-                continue;
-            }
-
-            values += "ID: <b>" + flipId + "</b> | ";
-
-            let lot = parseInt(event.raw.topics[3], 16) / 10 ** 18;
-            values += "lot: " + lot.toFixed(3) + " eth | ";
-
-            let raw = event.raw.data.slice(289, -248);
-            let bid = parseInt(raw, 16) / 10 ** 27 / 10 ** 18;
-            values += "bid: " + bid.toFixed(3) + " dai | ";
-
-            osmPrice = 0;
-            await getOsmPrice(event.blockNumber);
-
-            // Register TEND over Auction dictionary
-            auctions[flipId]["tends"] += 1;
-            auctions[flipId]["bid"] = bid.toFixed(5);
-            auctions[flipId]["bidPrice"] = osmPrice.toString();
-            auctions[flipId]["lot"] = lot.toFixed(5);
-            auctions[flipId]["paidPrice"] = (bid / lot).toFixed(2);
-
-            if (osmPrice > 0) {
-                // Calculate diff percentage
-                let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["bidPrice"]) - 1) * 100;
-                if (diff > 0) {
-                    values += "+" + diff.toFixed(1) + " % | ";
+        // Iterate over events
+        for (let i = 0; i < events.length; i++) {
+            let event = events[i];
+            let values = "";
+            let blockDate = new Date();
+            await web3.eth.getBlock(event.blockNumber).then(function (block) {
+                if (block) {
+                    let blockTime = block.timestamp;
+                    blockDate = new Date(blockTime * 1000);
+                    values = blockDate.toLocaleString() + " | ";
                 } else {
-                    values += "" + diff.toFixed(1) + " % | ";
+                    values = new Date().toLocaleString() + " | ";
                 }
-                values += "Price: $" + auctions[flipId]["bidPrice"] + " | ";
-            } else {
-                values += "--,-- % | Price: $---,-- | ";
-            }
-        } else if (event.raw.topics[0] === DENT) {
-            eventType = "DENT";
+            });
+            let eventType = "Unknown";
+            let flipId = 0;
 
-            flipId = parseInt(event.raw.topics[2], 16);
+            // Event types cases
+            if (event.event === "Kick") {
+                eventType = "KICK";
+                flipId = parseInt(event.returnValues.id, 10);
+                values += "ID: <b>" + flipId + "</b> | ";
 
-            if (!auctions[flipId]) {
-                continue;
-            }
+                let lot = event.returnValues.lot / 10 ** 18;
+                values += "lot: " + lot.toFixed(3) + " eth | ";
 
-            values += "ID: <b>" + flipId + "</b> | ";
+                let tab = event.returnValues.tab / 10 ** 27 / 10 ** 18;
+                values += "tab: " + tab.toFixed(3) + " dai | ";
 
-            let lot = parseInt(event.raw.topics[3], 16) / 10 ** 18;
-            values += "lot: " + lot.toFixed(3) + " eth | ";
+                osmPrice = 0;
+                await getOsmPrice(event.blockNumber);
 
-            let raw = event.raw.data.slice(289, -248);
-            let bid = parseInt(raw, 16) / 10 ** 27 / 10 ** 18;
-            values += "bid: " + bid.toFixed(3) + " dai | ";
+                // Register KICK over Auction dictionary
+                auctions[flipId] = {
+                    id: flipId,
+                    kickDate: blockDate.toUTCString().slice(5),
+                    kickDay: blockDate.getUTCDate(),
+                    kickMonth: blockDate.getUTCMonth() + 1,
+                    kickPrice: osmPrice.toString(),
+                    kickLot: lot.toFixed(5),
+                    tends: 0,
+                    dents: 0,
+                    bid: null,
+                    lot: null,
+                    tab: tab.toFixed(5),
+                    guy: null,
+                    dealPrice: null,
+                    paidPrice: null,
+                    state: "OPEN"
+                };
 
-            osmPrice = 0;
-            await getOsmPrice(event.blockNumber);
-
-            // Register DENT over Auction dictionary
-            auctions[flipId]["dents"] += 1;
-            auctions[flipId]["bid"] = bid.toFixed(5);
-            auctions[flipId]["bidPrice"] = osmPrice.toString();
-            auctions[flipId]["lot"] = lot.toFixed(5);
-            auctions[flipId]["paidPrice"] = (bid / lot).toFixed(2);
-
-            if (osmPrice > 0) {
-                // Calculate diff percentage
-                let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["bidPrice"]) - 1) * 100;
-                if (diff > 0) {
-                    values += "+" + diff.toFixed(2) + " % | ";
+                if (osmPrice > 0) {
+                    values += "Maker OSM Price: $" + auctions[flipId]["kickPrice"] + " | ";
                 } else {
-                    values += "" + diff.toFixed(2) + " % | ";
+                    values += "Maker OSM Price: $---,-- | ";
                 }
-                values += "Price: $" + auctions[flipId]["bidPrice"] + " | ";
-            } else {
-                values += "--,-- % | Price: $---,-- | ";
-            }
-        } else if (event.raw.topics[0] === DEAL) {
-            eventType = "DEAL";
+            } else if (event.raw.topics[0] === TEND) {
+                eventType = "TEND";
+                flipId = parseInt(event.raw.topics[2], 16);
 
-            flipId = parseInt(event.raw.topics[2], 16);
+                // Avoid showing TEND without a KICK
+                if (!auctions[flipId]) {
+                    continue;
+                }
 
-            if (!auctions[flipId]) {
-                continue;
-            }
+                values += "ID: <b>" + flipId + "</b> | ";
 
-            values += "ID: <b>" + flipId + "</b> | ";
+                let lot = parseInt(event.raw.topics[3], 16) / 10 ** 18;
+                values += "lot: " + lot.toFixed(3) + " eth | ";
 
-            osmPrice = 0;
-            await getOsmPrice(event.blockNumber);
+                let raw = event.raw.data.slice(289, -248);
+                let bid = parseInt(raw, 16) / 10 ** 27 / 10 ** 18;
+                values += "bid: " + bid.toFixed(3) + " dai | ";
 
-            // Register DEAL over Auction dictionary
-            auctions[flipId]["dealPrice"] = osmPrice.toString();
-            auctions[flipId]["state"] = "CLOSE";
+                osmPrice = 0;
+                await getOsmPrice(event.blockNumber);
 
-            if (!osmPrice) {
-                values += "Paid Rate: $" + auctions[flipId]["paidPrice"] + " dai/eth (+-.--%) | ";
-                values += "--,-- % | Price: $---,-- | ";
-            } else {
-                values += "Paid Rate: $" + auctions[flipId]["paidPrice"] + " dai/eth ";
-                let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["dealPrice"]) - 1) * 100;
-                if (diff > 0) {
-                    values += "(+" + diff.toFixed(2) + "%) ~ <b>Lost</b> | ";
+                // Register TEND over Auction dictionary
+                auctions[flipId]["tends"] += 1;
+                auctions[flipId]["bid"] = bid.toFixed(5);
+                auctions[flipId]["bidPrice"] = osmPrice.toString();
+                auctions[flipId]["lot"] = lot.toFixed(5);
+                auctions[flipId]["paidPrice"] = (bid / lot).toFixed(2);
+
+                if (osmPrice > 0) {
+                    // Calculate diff percentage
+                    let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["bidPrice"]) - 1) * 100;
+                    if (diff > 0) {
+                        values += "+" + diff.toFixed(1) + " % | ";
+                    } else {
+                        values += "" + diff.toFixed(1) + " % | ";
+                    }
+                    values += "Price: $" + auctions[flipId]["bidPrice"] + " | ";
                 } else {
-                    values += "(" + diff.toFixed(2) + "%) ~ <b>Won!</b> | ";
+                    values += "--,-- % | Price: $---,-- | ";
                 }
-                values += "Price: $" + auctions[flipId]["dealPrice"] + " | ";
+            } else if (event.raw.topics[0] === DENT) {
+                eventType = "DENT";
+
+                flipId = parseInt(event.raw.topics[2], 16);
+
+                if (!auctions[flipId]) {
+                    continue;
+                }
+
+                values += "ID: <b>" + flipId + "</b> | ";
+
+                let lot = parseInt(event.raw.topics[3], 16) / 10 ** 18;
+                values += "lot: " + lot.toFixed(3) + " eth | ";
+
+                let raw = event.raw.data.slice(289, -248);
+                let bid = parseInt(raw, 16) / 10 ** 27 / 10 ** 18;
+                values += "bid: " + bid.toFixed(3) + " dai | ";
+
+                osmPrice = 0;
+                await getOsmPrice(event.blockNumber);
+
+                // Register DENT over Auction dictionary
+                auctions[flipId]["dents"] += 1;
+                auctions[flipId]["bid"] = bid.toFixed(5);
+                auctions[flipId]["bidPrice"] = osmPrice.toString();
+                auctions[flipId]["lot"] = lot.toFixed(5);
+                auctions[flipId]["paidPrice"] = (bid / lot).toFixed(2);
+
+                if (osmPrice > 0) {
+                    // Calculate diff percentage
+                    let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["bidPrice"]) - 1) * 100;
+                    if (diff > 0) {
+                        values += "+" + diff.toFixed(2) + " % | ";
+                    } else {
+                        values += "" + diff.toFixed(2) + " % | ";
+                    }
+                    values += "Price: $" + auctions[flipId]["bidPrice"] + " | ";
+                } else {
+                    values += "--,-- % | Price: $---,-- | ";
+                }
+            } else if (event.raw.topics[0] === DEAL) {
+                eventType = "DEAL";
+
+                flipId = parseInt(event.raw.topics[2], 16);
+
+                if (!auctions[flipId]) {
+                    continue;
+                }
+
+                values += "ID: <b>" + flipId + "</b> | ";
+
+                osmPrice = 0;
+                await getOsmPrice(event.blockNumber);
+
+                // Register DEAL over Auction dictionary
+                auctions[flipId]["dealPrice"] = osmPrice.toString();
+                auctions[flipId]["state"] = "CLOSE";
+
+                if (!osmPrice) {
+                    values += "Paid Rate: $" + auctions[flipId]["paidPrice"] + " dai/eth (+-.--%) | ";
+                    values += "--,-- % | Price: $---,-- | ";
+                } else {
+                    values += "Paid Rate: $" + auctions[flipId]["paidPrice"] + " dai/eth ";
+                    let diff = ((auctions[flipId]["paidPrice"] / auctions[flipId]["dealPrice"]) - 1) * 100;
+                    if (diff > 0) {
+                        values += "(+" + diff.toFixed(2) + "%) ~ <b>Lost</b> | ";
+                    } else {
+                        values += "(" + diff.toFixed(2) + "%) ~ <b>Won!</b> | ";
+                    }
+                    values += "Price: $" + auctions[flipId]["dealPrice"] + " | ";
+                }
+            } else if (event.raw.topics[0] === TICK) {
+                eventType = "TICK";
+                flipId = parseInt(event.raw.topics[2], 16);
+                values += "ID: <b>" + flipId + "</b> | ";
+                values += "Time extended! | ";
+            } else {
+                console.log("Uknown event");
+                console.log(event);
             }
-        } else if (event.raw.topics[0] === TICK) {
-            eventType = "TICK";
-            flipId = parseInt(event.raw.topics[2], 16);
-            values += "ID: <b>" + flipId + "</b> | ";
-            values += "Time extended! | ";
+
+            // Get event tx info
+            // Get event tx info
+            await web3.eth.getTransaction(event.transactionHash).then(function (tx) {
+                let from = tx.from.slice(0, 6) + "..." + tx.from.slice(-4);
+                let txHref = `https://etherscan.io/tx/${event.transactionHash}`;
+                let txLink = `<a target="_blank" href="${txHref}">Tx:..${event.transactionHash.slice(-3)} Info</a>`;
+                values += `from: ${from} | ${txLink} >>`;
+                if (auctions[flipId]) {
+                    auctions[flipId]["guy"] = from;
+                }
+            });
+
+            // Get old page and Render new line in app
+            let content = document.getElementById("app");
+            let newLine = document.createElement("div");
+
+            if (someID === 0 || someID === flipId) {
+                newLine.className = "row flip-" + flipId + " " + eventType.toLowerCase();
+                newLine.innerHTML = eventType + " >> " + values;
+            }
+
+            content.appendChild(newLine);
+        }
+
+        // Verify if there is any registered auction to show
+        if (Object.keys(auctions).length > 0) {
+            showFilter();
         } else {
-            console.log("Uknown event");
-            console.log(event);
+            showEmptyMessage();
+        }
+        eventsLoaded = true;
+    };
+
+
+    var fetchAuctions = async function fetchAuctions(someID) {
+        const lastBlockfetch = await web3.eth.getBlockNumber();
+
+        for (let i = lastBlockfetch - 20000; i < lastBlockfetch; i += 5000) {
+            await getFlipEvents(i, i + 5000);
         }
 
-        // Get event tx info
-        // Get event tx info
-        await web3.eth.getTransaction(event.transactionHash).then(function (tx) {
-            let from = tx.from.slice(0, 6) + "..." + tx.from.slice(-4);
-            let txHref = `https://etherscan.io/tx/${event.transactionHash}`;
-            let txLink = `<a target="_blank" href="${txHref}">Tx:..${event.transactionHash.slice(-3)} Info</a>`;
-            values += `from: ${from} | ${txLink} >>`;
-            if (auctions[flipId]) {
-                auctions[flipId]["guy"] = from;
-            }
-        });
+        await showEvents(someID);
+    };
 
-        // Get old page and Render new line in app
-        let oldPage = document.getElementById("app").innerHTML;
-        let newLine = "";
-        if (someID === 0 || someID === flipId) {
-            newLine = "<div class=\"row flip-" + flipId + " " + eventType.toLowerCase() + "\">" +
-                eventType + " >> " + values + "</div>";
+    // New block event handler
+    async function newBlock(error, result) {
+        if (result) {
+            let newBlockNumber = result.number;
+            if (!eventsLoaded) return;
+
+            // Clear events and fetch new ones
+            eventsLoaded = false;
+            await getFlipEvents(newBlockNumber);
+            await showEvents(0);
+        } else {
+            console.log(error);
         }
-        document.getElementById("app").innerHTML = newLine + oldPage;
     }
 
-    // Verify if there is any registered auction to show
-    if (Object.keys(auctions).length > 0) {
-        showFilter();
-    } else {
-        showEmptyMessage();
+    // Utility/helpers functions
+    function showFilter() {
+        let filterPanel = document.getElementById("filter-panel");
+
+        if (filterPanel) {
+            filterPanel.style.display = "block";
+            let searchTag = document.getElementById("search");
+            searchTag.style.display = "inline";
+            let noResultsTag = document.getElementById("no-results");
+            noResultsTag.style.display = "none";
+            showLastUpdate();
+        }
     }
-    eventsLoaded = true;
-};
 
-// Fetch old events to populate list at initial load
-var lastBlockfetch = 0;
-var fetchAuctions = async function fetchAuctions(someID) {
-    lastBlockfetch = await web3.eth.getBlockNumber();
-    let fromBlock = lastBlockfetch - 18095; // 18095 -> 3.14 days blocks count
-    await getFlipEvents(fromBlock);
-    await showEvents(someID);
-};
-
-// New block event handler
-async function newBlock(error, result) {
-    if (result) {
-        let newBlockNumber = result.number;
-        if (!eventsLoaded) return;
-
-        // Clear events and fetch new ones
-        eventsLoaded = false;
-        await getFlipEvents(newBlockNumber);
-        await showEvents(0);
-    } else {
-        console.log(error);
+    function showLastUpdate() {
+        let lastUpdateTag = document.getElementById("last-update");
+        let now = new Date().toLocaleString();
+        lastUpdateTag.innerHTML = `- Updated to: ${now}`;
     }
-}
 
-// Utility/helpers functions
-function showFilter() {
-    let filterPanel = document.getElementById("filter-panel");
-
-    if (filterPanel) {
-        filterPanel.style.display = "block";
-        let searchTag = document.getElementById("search");
-        searchTag.style.display = "inline";
-        let noResultsTag = document.getElementById("no-results");
-        noResultsTag.style.display = "none";
-        showLastUpdate();
+    function hideFilterSearch() {
+        let filterPanelSearch = document.getElementById("search");
+        if (filterPanelSearch) {
+            filterPanelSearch.style.display = "none";
+        }
     }
-}
 
-function showLastUpdate() {
-    let lastUpdateTag = document.getElementById("last-update");
-    let now = new Date().toLocaleString();
-    lastUpdateTag.innerHTML = `- Updated to: ${now}`;
-}
+    function showEmptyMessage() {
+        let filterPanel = document.getElementById("filter-panel");
 
-function hideFilterSearch() {
-    let filterPanelSearch = document.getElementById("search");
-    if (filterPanelSearch) {
-        filterPanelSearch.style.display = "none";
+        if (filterPanel) {
+            filterPanel.style.display = "block";
+            let searchTag = document.getElementById("search");
+            searchTag.style.display = "none";
+            let noResultsTag = document.getElementById("no-results");
+            noResultsTag.style.display = "inline";
+            showLastUpdate();
+        }
     }
-}
 
-function showEmptyMessage() {
-    let filterPanel = document.getElementById("filter-panel");
-
-    if (filterPanel) {
-        filterPanel.style.display = "block";
-        let searchTag = document.getElementById("search");
-        searchTag.style.display = "none";
-        let noResultsTag = document.getElementById("no-results");
-        noResultsTag.style.display = "inline";
-        showLastUpdate();
+    function filterAuctionById() {
+        let flipId = $("#fliter-id").val();
+        let allRows = $(".row");
+        allRows.hide();
+        if (flipId) {
+            $(".flip-" + flipId).show()
+        } else {
+            allRows.show();
+        }
     }
-}
-
-function filterAuctionById() {
-    let flipId = $("#fliter-id").val();
-    let allRows = $(".row");
-    allRows.hide();
-    if (flipId) {
-        $(".flip-" + flipId).show()
-    } else {
-        allRows.show();
-    }
-}
 
 
-// ## Start Main function
-fetchAuctions(0);
+    // ## Start Main function
+    fetchAuctions(0);
 
-// Only in DEV version (comment this line before minimize it)
-//console.log('Loaded not optimized file');
+    // Only in DEV version (comment this line before minimize it)
+    //console.log('Loaded not optimized file');
 
-// Subscribe to new blocks
-setTimeout(function () {
-    console.log('Getting new data from chain...');
-    web3.eth.subscribe('newBlockHeaders', newBlock);
-}, 5000);
+    // Subscribe to new blocks
+    setTimeout(function () {
+        console.log('Getting new data from chain...');
+        web3.eth.subscribe('newBlockHeaders', newBlock);
+    }, 5000);
+
+});
